@@ -28,6 +28,7 @@ def OnKeyboardEvent(event):
         f.close()
         hm.UnhookMouse()
         hm.UnhookKeyboard()
+        user32.PostQuitMessage(0)
     elif event.MessageName == 'key down':
         if keyMonitor.get(event.Key, False) == False:
             keyMonitor[event.Key] = True
