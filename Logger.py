@@ -45,5 +45,4 @@ hm = pyHook.HookManager()
 hm.MouseAll = OnMouseEvent
 hm.KeyAll = OnKeyboardEvent
 hm.HookKeyboard()
-hm.HookMouse()
 pythoncom.PumpMessages()
