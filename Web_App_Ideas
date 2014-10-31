@@ -1,0 +1,7 @@
+Web application requirements/thoughts:
+Security: Users should require authentication to help prevent misuse
+Should host the recording script as an executable to download.
+Should allow users to upload their logs, and maybe choose the game ID by using an AJAX call to Freebase game records?
+Server side script adds the raw log to a database table
+Processes similarity algorithms and stores them in similarity tables so they don't have to be re-generated.
+Maybe store everything using triples/RDF linking games to logs, logs to users, logs to metrics, etc?
