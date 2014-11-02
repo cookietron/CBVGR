@@ -1,147 +1,154 @@
-#gametime makes the Profiler wait to start counting actions until after the user has activited the logger
-#it knows that recording has started by looking for the row in the TSV that lists the screen resolution
-gametime = False
-#gamename limits the Profiler to counting events that are happening in the same window, so if someone switches to another application, it won't affect the counts
-gamename = ''
-starttime = 0
-xresolution = 0
-yresolution = 0
-xunit = 0
-yunit = 0
-
-actions = {}
-unactions = {}
-durations = {}
-actioncounts = {}
-unactioncounts = {}
-durationcounts = {}
-durationaverages = {}
-
-rawclicks = []
-
 import csv
-with open('PacManDSX.tsv', 'rb') as f:
-    reader = csv.reader(f, delimiter='\t')
-    for row in reader:
-        # this condition flips the gametime switch once the resolution row appears
-        # until this happens it won't do anything with any of the log data.
-        if gametime == False:
-            if row[0] == 'Resolution':
-                xresolution = row[1]
-                yresolution = row[2]
-                xunit = int(xresolution)/16
-                yunit = int(yresolution)/12
-                gametime = True
-        # the else condition will kick in once gametime is True
-        else:
-            # this converts the time value to a number
-            row[2] = int(row[2])
-            # the first time that this condition is True, the gamename value will be set to the Window name
-            if gamename == '':
-                gamename = row[0]
-            # after this is set, only actions in the same Window will be acted upon:
+
+# vectortransform takes the log filename and returns a dictionary of the input keys with values for:
+# raw count, raw duration, avg count per minute and avg duration per minute
+def vectortransform(filename):
+    gametime = False
+    gamename = ''
+    starttime = 0
+    endtime = 0
+    totaltime = 0
+    resultvector = {}
+    lastact = ''
+    with open(filename, 'rb') as f:
+        reader = csv.reader(f, delimiter='\t')
+        for row in reader:
+            if gametime == False:
+                if row[0] == 'Resolution':
+                    gametime = True
             else:
-                if row[0] == gamename:
-                    # this works on key down actions
-                    if row[1] == 'key down':
-                        # if the name of the key already exists within the actions dictionary...
-                        if row[3] in actions:
-                            # then the Time of the key press is added to the array for that key
-                            actions[row[3]].append(row[2])
-                            # and the actioncounts dictionary value for that key is increased by one
-                            actioncounts[row[3]] += 1
-                        # if the key hasn't been used yet...
-                        else:
-                            # then a dictionary entry is created (note that the value is an array with one initial value)
-                            actions[row[3]] = [row[2]]
-                            # and an actioncounts key is created and initialized
-                            actioncounts[row[3]] = 1
-                    # this works on key up actions and effectively is a mirror image of the key up actions
-                    elif row[1] == 'key up':
-                        if row[3] in unactions:
-                            unactions[row[3]].append(row[2])
-                            unactioncounts[row[3]] += 1
-                        else:
-                            unactions[row[3]]=[row[2]]
-                            unactioncounts[row[3]] = 1
-                    # anything that is being recorded that is not a key down/key up is a mouse event, which are recorded a bit differently
-                    # luckily after the keyboard eventualities have been eliminated we can just use an else condition
-                    else:
-                        # the way that pyhook captures mouse clicks, it doesn't record the mouse button in the same way as keyboard key
-                        # splits takes the mouse event and breaks it up into an array
-                        splits = row[1].split(" ")
-                        # the actionname is then determined by the first two words, e.g. "mouse left" as a stand in for the name of the key
-                        actionname = splits[0] + " " + splits[1]
-                        # row[3] for mouse events is the screen coordinates; the translate method removes the parenthesis that encompass the x, y
-                        coords = row[3].translate(None, '()')
-                        # then they're split on the comma space into a two value array
-                        coords = coords.split(", ")
-                        # after the first two words, such as mouse left, mouse right, etc., the third word is up or down
-                        if splits[2] == 'down':
-                            # this piece here is an early attempt at recording where on the screen the clicks are happening
-                            clickx = int(round(int(coords[0])/xunit, 0))
-                            clicky = int(round(int(coords[1])/yunit, 0))
-                            rawclicks.append([clickx, clicky])
-                            # this mirrors the key down recording
-                            if actionname in actions:
-                                actions[actionname].append(row[2])
-                                actioncounts[actionname] += 1
+                row[2] = int(row[2])
+                if gamename == '':
+                    gamename = row[0]
+                    starttime = row[2]
+                else:
+                    if row[0] == gamename:
+                        if row[1] == 'key down':
+                            if row[3] in resultvector:
+                                resultvector[row[3]]['count'] += 1
+                                resultvector[row[3]]['duration'] -= row[2]
                             else:
-                                actions[actionname] = [row[2]]
-                                actioncounts[actionname] = 1
-                        elif splits[2] == 'up':
-                            # while this mirrors the key up recording
-                            if actionname in unactions:
-                                unactions[actionname].append(row[2])
-                                unactioncounts[actionname] +=1
-                            else:
-                                unactions[actionname] = [row[2]]
-                                unactioncounts[actionname] = 1
-                                
-                            
+                                resultvector[row[3]] = {'count':1, 'duration': 0 - row[2]}
+                        elif row[1] == 'key up':
+                            resultvector[row[3]]['duration'] += row[2]
+                        else:
+                            splits = row[1].split(" ")
+                            actionname = splits[0] + " " + splits[1]
+                            if row[1] != lastact:
+                                if splits[2] == 'down':
+                                    if actionname in resultvector:
+                                        resultvector[actionname]['count'] += 1
+                                        resultvector[actionname]['duration'] -= row[2]
+                                    else:
+                                        resultvector[actionname] = {'count':1, 'duration': 0 - row[2]}
+                                elif splits[2] == 'up':
+                                    resultvector[actionname]['duration'] += row[2]
+                            lastact = row[1]
+            endtime = row[2]
+    totaltime = (endtime - starttime) / 60000.0
+    for i in resultvector:
+        resultvector[i]['duration'] /= 60000.0
+        resultvector[i]['count_per_m'] = float(resultvector[i]['count']) / totaltime
+        resultvector[i]['duration_per_m'] = float(resultvector[i]['duration']) / totaltime
+    #print totaltime, 'total time of '+gamename
+    return resultvector
 
-# this printout is unneccessary for the function
-print 'Action(s):'
-print actioncounts
+# orderedvector takes the result from resultvector and returns a list with the values largest to smallest
+# it exists as an attempt to try and compensate for similar gameplay with different key configurations
+def orderedvector(resultvector):
+    temp = []
+    output = []
+    total = 0
+    for i in resultvector:
+        temp.append(resultvector[i]['count_per_m'])
+        total += resultvector[i]['count_per_m']
+    temp.sort()
+    for i in temp:
+        output.append(i/total)
+    output.reverse()
+    return output
 
-# this loop takes each key in the actioncounts dictionary and creates a value in the durations dictionary
-for x in actioncounts:
-    durations[x] = []
-    # it then zips together the Time values for that key's down and up actions...
-    temp = zip(actions[x], unactions[x])
-    # and for each tuple, it adds the difference between the key up and the key down to the durations array value
-    for z in range(len(temp)):
-        z1, z2 = temp[z]
-        durations[x].append(z2-z1)
+# innerproduct is used within the vectorspace model could probably replace with mathlab function?
+def innerproduct(x, y):
+    output = 0
+    if len(x) == len(y):
+        for thing in range(len(x)):
+            output = output + x[thing] * y[thing]
+    return output
 
-# this loop then takes the raw duration values and counts the total time a key was depressed and stores that in durationcounts
-# and also determines the average length by dividing the total length of time by the quantity of keypresses
-for x in durations:
-    instances = 0
-    timespan = 0
-    for z in durations[x]:
-        instances +=1
-        timespan += z
-    durationcounts[x] = timespan
-    durationaverages[x] = timespan/instances
+# also used within the vector space similarity equation
+def vectornorm(x, y):
+    xcom = 0
+    ycom = 0
+    output = 0
+    for thing in range(len(x)):
+        xcom += x[thing]**2
+    for thing in range(len(y)):
+        ycom += y[thing]**2
+    output = (xcom ** 0.5) * (ycom ** 0.5)
+    return output
 
-# this printout is unneccessary for the function
-print 'Duration Total(s):'
-print durationcounts
-print 'Duration Mean(s):'
-print durationaverages
+# applies the vectorspace model to to two vectors
+def vectorspace(x, y):
+    numerator = innerproduct(x,y)
+    denominator = vectornorm(x, y)
+    return numerator/denominator
+
+# similarity takes two result vectors and creates lists/vectors with 0s filling in absent values
+# then uses those lists/vectors to plug into the vectorspace function and returns the similarity
+def similarity(x, y, type):
+    commonx =[]
+    commony = []
+    if type == '':
+        for i in range(len(x)):
+            commonx.append(x[i])
+        for i in range(len(y)):
+            commony.append(y[i])
+        z = len(commonx) - len(commony)
+        if z > 0:
+            for i in range(z):
+                commony.append(0.0)
+        if z < 0:
+            for i in range(abs(z)):
+                commonx.append(0.0)            
+    else:
+        for thing in x:
+            commonx.append(x[thing][type])
+            if thing in y:
+                commony.append(y[thing][type])
+                del y[thing]
+            else:
+                commony.append(0)
+        for thing in y:
+            commonx.append(0)
+            commony.append(y[thing][type])
+    return vectorspace(commonx, commony)
+
+# garbage function to figure out the total running time of a particular log?
+def time_print(x):
+    for thing in x:
+        y = x[thing]['count_per_m']
+        z = x[thing]['count'] / x[thing]['count_per_m']
+        print thing, z, y, x[thing]['count']
+
+# this function uses the similarity metrics from two sources and computes the norm of those two
+# as an attempt to reach a compound similarity metric
+# could probably be expanded to include any number of different metrics
+def two_factor(x,y):
+    i = similarity(vectortransform(x), vectortransform(y), 'count_per_m')
+    j = similarity(vectortransform(x), vectortransform(y), 'duration_per_m')
+    k = (i**2+j**2)**0.5
+    return x + ' and ' + y + ' are this alike: ' + str(k)
+
+# example comparisons:
+print '@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@'
+print two_factor('PacManDSX.tsv','SuperHexagon.tsv')
+print two_factor('PacManDSX.tsv','Hearthstone2.tsv')
+print two_factor('Hearthstone2.tsv', 'PapersPlease.tsv')
+print '@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@'
+
+# test of orderedvector usage
+print similarity(orderedvector(vectortransform('PacManDSX.tsv')),orderedvector(vectortransform('Hearthstone2.tsv')), '')
 
 
-map = []
-for x in range(12):
-    map.append([0]*16)
 
-for a in rawclicks:
-    ay = a[1]
-    mx = map[ay]
-    ax = a[0]
-    mx[ax] += 1
-    map[ay] = mx
-
-for i in map:
-    print i
